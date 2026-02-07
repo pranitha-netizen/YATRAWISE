@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>YATRA WISE</title>
+
+  <!-- Leaflet (free, no API key needed) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial;
+      background: #0b0f1a;
+      color: #00ffd5;
+      text-align: center;
+    }
+
+    .card {
+      background: #111;
+      padding: 20px;
+      margin: 20px auto;
+      width: 300px;
+      border-radius: 10px;
+      box-shadow: 0 0 15px #00ffd5;
+    }
+
+    input, button {
+      width: 90%;
+      padding: 8px;
+      margin: 8px;
+    }
+
+    button {
+      background: #00ffd5;
+      color: #0b0f1a;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #00ccaa;
+    }
+
+    #map {
+      height: 400px;
+      width: 90%;
+      margin: auto;
+      border-radius: 10px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .alert-box {
+      margin: 8px;
+      padding: 12px;
+      background: #1a1a2e;
+      border-radius: 8px;
+      text-align: left;
+    }
+
+    .fake-call-modal {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #111;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 0 30px #00ffd5;
+      z-index: 1000;
+      min-width: 280px;
+    }
+
+    .fake-call-modal .close-btn {
+      margin-top: 15px;
+      width: 100%;
+    }
+
+    .overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 999;
+    }
+  </style>
+</head>
+
+<body>
+
+<h1>🔐 YATRA WISE </h1>
+
+
+<!-- LOGIN -->
+<div class="card" id="loginCard">
+  <h2>Secure Login</h2>
+  <input id="email" placeholder="Email" type="email">
+  <input id="password" type="password" placeholder="Password">
+  <button onclick="login()">Login</button>
+  <button onclick="toggleRegister()" style="background:#333;color:#00ffd5;">Register instead</button>
+</div>
+
+<!-- REGISTER -->
+<div class="card hidden" id="registerCard">
+  <h2>Register</h2>
+  <input id="regEmail" placeholder="Email" type="email">
+  <input id="regPassword" type="password" placeholder="Password">
+  <button onclick="register()">Register</button>
+  <button onclick="toggleRegister()" style="background:#333;color:#00ffd5;">Back to Login</button>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard" class="hidden">
+
+  <div class="card">
+    <h2>🔒 Privacy Dashboard</h2>
+    <p>Data Collected: Location, Login Logs</p>
+    <p>Encryption: AES-256</p>
+    <p id="privacyScore">Privacy Score: 92%</p>
+    <button onclick="deleteMyData()">Delete My Data</button>
+  </div>
+
+  <h2>🗺 Map</h2>
+  <div id="map"></div>
+
+  <div class="card">
+    <h2>👩 Women Safety</h2>
+    <button onclick="sendSOS()">🚨 SOS Emergency</button>
+    <button onclick="fakeCall()">📞 Fake Call</button>
+    <p>Solo Travel Safety Score: 88%</p>
+  </div>
+
+  <div class="card">
+    <h2>🚨 Safety Alerts</h2>
+    <div id="alertsContainer"></div>
+  </div>
+
+</div>
+
+<script>
+  const API_BASE = window.location.origin;
+  let currentUser = null;
+  let map = null;
+
+  function toggleRegister() {
+    document.getElementById('loginCard').classList.toggle('hidden');
+    document.getElementById('registerCard').classList.toggle('hidden');
+  }
+
+  async function register() {
+    const email = document.getElementById('regEmail').value;
+    const password = document.getElementById('regPassword').value;
+    if (!email || !password) {
+      alert('Please enter email and password');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('Registered! Please login.');
+        toggleRegister();
+        document.getElementById('regEmail').value = '';
+        document.getElementById('regPassword').value = '';
+      } else {
+        alert(data.error || 'Registration failed');
+      }
+    } catch (e) {
+      alert('Server error. Is the backend running?');
+    }
+  }
+
+  async function login() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    if (!email || !password) {
+      alert('Please enter email and password');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (data.success) {
+        currentUser = email;
+        document.getElementById('loginCard').classList.add('hidden');
+        document.getElementById('dashboard').classList.remove('hidden');
+        initMap();
+        loadAlerts();
+        loadDashboard();
+      } else {
+        alert(data.error || 'Login failed');
+      }
+    } catch (e) {
+      alert('Server error. Is the backend running? Run: npm start');
+    }
+  }
+
+  function initMap() {
+    if (map) return;
+    map = L.map('map').setView([28.6139, 77.2090], 13); // Delhi default
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const { latitude, longitude } = pos.coords;
+          map.setView([latitude, longitude], 14);
+          L.marker([latitude, longitude]).addTo(map).bindPopup('You are here');
+          sendLocation(latitude, longitude);
+        },
+        () => console.log('Geolocation denied')
+      );
+    }
+
+    // Demo safety markers
+    const demoMarkers = [
+      [28.6139, 77.2090, '🟢 Safe Zone'],
+      [28.6200, 77.2150, '🟡 Caution Area'],
+      [28.6050, 77.2000, '🔴 Unsafe Zone']
+    ];
+    demoMarkers.forEach(([lat, lng, label]) => {
+      L.marker([lat, lng]).addTo(map).bindPopup(label);
+    });
+  }
+
+  async function sendLocation(lat, lng) {
+    if (!currentUser) return;
+    try {
+      await fetch(`${API_BASE}/api/location`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: currentUser, lat, lng })
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  async function sendSOS() {
+    let lat = null, lng = null;
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => { lat = pos.coords.latitude; lng = pos.coords.longitude; },
+        () => {}
+      );
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/sos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: currentUser,
+          lat, lng,
+          message: 'Emergency SOS - User requested help'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('🚨 SOS sent! Emergency services notified.');
+      } else {
+        alert('SOS failed. Please try again.');
+      }
+    } catch (e) {
+      alert('Could not reach server. Call emergency services directly.');
+    }
+  }
+
+  function fakeCall() {
+    const modal = document.createElement('div');
+    modal.className = 'overlay';
+    modal.innerHTML = `
+      <div class="fake-call-modal">
+        <h3>📞 Incoming Call</h3>
+        <p>Mom / Dad</p>
+        <p style="font-size:14px;color:#888;">Fake call simulation</p>
+        <button class="close-btn" onclick="this.closest('.overlay').remove()">End Call</button>
+      </div>
+    `;
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    document.body.appendChild(modal);
+  }
+
+  async function loadAlerts() {
+    try {
+      const res = await fetch(`${API_BASE}/api/alerts`);
+      const alerts = await res.json();
+      const container = document.getElementById('alertsContainer');
+      container.innerHTML = alerts.map(a =>
+        `<div class="alert-box">⚠️ ${a.message}<br><small>${a.area} - ${a.severity}</small></div>`
+      ).join('');
+    } catch (e) {
+      document.getElementById('alertsContainer').innerHTML =
+        '<p>⚠️ Overcrowding Alert</p><p>🚫 Unsafe Area Nearby</p><p>🌧 Weather Alert</p>';
+    }
+  }
+
+  async function loadDashboard() {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/dashboard/${encodeURIComponent(currentUser)}`);
+      const data = await res.json();
+      const el = document.getElementById('privacyScore');
+      if (el) el.textContent = `Privacy Score: ${data.privacyScore || 92}%`;
+    } catch (e) { /* use defaults */ }
+  }
+
+  async function deleteMyData() {
+    if (!confirm('Delete all your data? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/user/${encodeURIComponent(currentUser)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('Your data has been deleted.');
+        currentUser = null;
+        document.getElementById('dashboard').classList.add('hidden');
+        document.getElementById('loginCard').classList.remove('hidden');
+      }
+    } catch (e) {
+      alert('Could not delete data.');
+    }
+  }
+</script>
+
+</body>
+</html>
